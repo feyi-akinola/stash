@@ -25,7 +25,7 @@ export async function signInAction(formData: FormData) {
   redirect("/");
 };
 
-export async function signOutAction(formData: FormData) {
+export async function signOutAction() {
   await auth.api.signOut({
     headers: await headers(),
   });

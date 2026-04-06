@@ -4,9 +4,14 @@ export type Message = {
   created_at: string;
   sender_id: string;
   room_id: string;
-  message_type: "text" | "voice";
-  role: "user" | "ai";
+  message_type: 0 | 1;
+  role: 0 | 1;
 }
+
+export type TempMessage = Message & {
+  tempId?: string;
+  sending?: boolean;
+};
 
 export type Room = {
   id: string;
