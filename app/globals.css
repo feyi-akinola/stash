@@ -39,4 +39,18 @@ body {
     @apply cursor-pointer text-white/60 hover:text-white transition-all
     duration-300;
   }
+
+  .scrollbar-hidden {
+    -ms-overflow-style: none; /* IE & Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hidden {
+    -ms-overflow-style: none; /* IE & Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
 }
