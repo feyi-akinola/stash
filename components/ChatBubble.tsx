@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Play, Square } from "lucide-react";
 import { ComponentPropsWithoutRef, useCallback, useEffect, useMemo, useState } from "react";
+import AudioPreview from "./AudioPreview";
 
 type ChatBubbleProps = {
   message: Message & { sending?: boolean };
@@ -103,7 +104,11 @@ const ChatBubble = ({ message, isSent, senderName } : ChatBubbleProps) => {
         }}
         className="bg-white/80 text-black/80 rounded-2xl px-6 py-3 flex gap-2">
         {isVoiceMessage ? (
-          <audio controls src={content} className="w-full min-w-[220px]" />
+          <AudioPreview
+            style={{ minWidth: "220px" }}
+            url={content}
+            isInput={false}
+          />
         ) : isAiMessage ? (
           <div className="flex flex-col gap-4">
             <div className="flex justify-center items-center bg-black/20 rounded-full p-2 gap-2">
@@ -112,10 +117,10 @@ const ChatBubble = ({ message, isSent, senderName } : ChatBubbleProps) => {
               <button
                 type="button"
                 onClick={toggleSpeech}
-                className="ml-1 p-1 rounded-full hover:bg-black/20 transition-colors"
+                className="ml-8 p-1.5 rounded-full bg-black/10 hover:bg-black/20 transition-colors cursor-pointer"
                 aria-label={isSpeaking ? "Stop AI speech" : "Play AI speech"}
               >
-                {isSpeaking ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {isSpeaking ? <Square className="w-2.5 h-2.5 fill-black" /> : <Play className="w-2.5 h-2.5 fill-black" />}
               </button>
             </div>
 

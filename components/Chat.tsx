@@ -1,5 +1,5 @@
 "use client";
-import { Mic, Send, Square } from "lucide-react";
+import { Mic, Play, Send, Square, Trash2 } from "lucide-react";
 import ChatButton from "./ChatButton";
 import { useMemo, Dispatch, ReactElement, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -7,11 +7,14 @@ import ChatBubble from "./ChatBubble";
 import { Message, TempMessage } from "@/types/types";
 import { BeatLoader, PuffLoader } from "react-spinners";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import AudioPreview from "./AudioPreview";
 
 const icons: Record<string, ReactElement> = {
   mic: <Mic className="text-white/70 w-5 h-5"/>,
   micRecording: <Square className="text-red-400 w-5 h-5"/>,
-  send: <Send className="text-white/70 w-5 h-5"/>
+  send: <Send className="text-white/70 w-5 h-5"/>,
+  stop: <Square className="text-red-400 w-5 h-5 animate-pulse"/>,
+  cancel: <Trash2 className="text-red-400/70 w-5 h-5"/>,  
 };
 
 type ChatProps = {
@@ -45,8 +48,15 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const [page, setPage] = useState<number>(0);
   const [input, setInput] = useState<string>("");
   const [isOtherTyping, setIsOtherTyping] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
+  
+  const [isRecording, setIsRecording] = useState(false);
+
+  type RecordingState = "idle" | "recording" | "previewing";
+
+  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -60,6 +70,112 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
   // --- HELPERS ---
+
+  const startRecording = async () => {
+    try {
+      stopTyping();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        setRecordedBlob(blob);
+        setAudioPreviewUrl(url);
+
+        setRecordingState("previewing");
+
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setRecordingState("recording");
+    } catch (err) {
+      console.error("Mic error:", err);
+    }
+  };
+
+  const finishRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const cancelRecording = useCallback(() => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.onstop = null; 
+      mediaRecorderRef.current.stop();
+    }
+    
+    // Cleanup memory and reset to IDLE
+    if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+    setAudioPreviewUrl(null);
+    setRecordedBlob(null);
+    setRecordingState("idle");
+  }, [audioPreviewUrl]);
+
+  const uploadAndSendVoice = async () => {
+    if (!recordedBlob || !selectedRoom) return;
+
+    const fileName = `${userId}/${Date.now()}.webm`;
+    const tempPreview = audioPreviewUrl;
+    
+    setRecordingState("idle");
+    setAudioPreviewUrl(null);
+    setRecordedBlob(null);
+
+    const tempId = `voice-temp-${crypto.randomUUID()}`;
+    const optimistic: TempMessage = {
+      id: tempId,
+      content: tempPreview || "", 
+      created_at: new Date().toISOString(),
+      sender_id: userId,
+      role: 1,
+      room_id: selectedRoom,
+      message_type: 2,
+      sending: true,
+    };
+    setMessages(prev => [...prev, optimistic]);
+
+    try {
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("voice-messages")
+        .upload(fileName, recordedBlob);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("voice-messages")
+        .getPublicUrl(fileName);
+
+      const { data, error: dbError } = await supabase
+        .from("message")
+        .insert({
+          room_id: selectedRoom,
+          content: publicUrl,
+          sender_id: userId,
+          role: 1,
+          message_type: 2,
+        })
+        .select()
+        .single();
+
+      if (dbError) throw dbError;
+
+      if (data) {
+        setMessages(prev => prev.map(msg => msg.id === tempId ? data : msg));
+      }
+    } catch (err) {
+      console.error("Voice send error:", err);
+      setMessages(prev => prev.filter(msg => msg.id !== tempId));
+    }
+  };
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (containerRef.current) {
@@ -121,7 +237,6 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     if (value.trim().length > 0) {
       isTypingRef.current = true;
 
-      // Broadcast periodically while typing so remote clients can expire stale states.
       const now = Date.now();
       if (now - lastTypingTrackRef.current > 800) {
         channelRef.current.track({
@@ -133,11 +248,9 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
         lastTypingTrackRef.current = now;
       }
 
-      // Refresh the 5s "Inactivity" timer
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(stopTyping, TYPING_IDLE_MS);
     } else {
-      // Manual clear (backspace) stops typing immediately
       stopTyping();
     }
   };
@@ -281,7 +394,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       console.error("Microphone access failed", error);
       setIsRecording(false);
     }
-  }, [blobToDataUrl, isRecording, sendVoiceMessage, stopRecording, stopTyping]);
+  }, [blobToDataUrl, sendVoiceMessage, stopRecording, stopTyping]);
 
   const buildAiHistory = useCallback(
     (latestUserInput: string) => {
@@ -315,7 +428,6 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     if (isAiCommand && !aiPrompt) return;
     setInput("");
 
-    // --- CRITICAL FIX: Tell everyone I stopped typing FIRST ---
     stopTyping(); 
 
     const tempId = crypto.randomUUID();
@@ -461,7 +573,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     if (!selectedRoom) return;
 
     const channel = supabase.channel(`room:${selectedRoom}`, {
-      config: { presence: { key: presenceKey } } // Bind presence to the specific userId
+      config: { presence: { key: presenceKey } }
     });
     channelRef.current = channel;
 
@@ -473,7 +585,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
           if (newMessage.sender_id !== userId) {
             suppressOtherTypingUntilRef.current = Date.now() + POST_MESSAGE_TYPING_SUPPRESS_MS;
-            setIsOtherTyping(false); // 🔥 immediate clear
+            setIsOtherTyping(false);
           }
 
           setMessages((current) => {
@@ -502,7 +614,6 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          // Ensure we do not leave stale typing=true when joining/rejoining.
           channel.track({
             user: userId,
             sessionId,
@@ -617,16 +728,43 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
             )}
           </div>
 
-          <div className="mt-4 bg-white/10 rounded-3xl pl-6 py-2 pr-3 flex gap-2 shrink-0">
-            <input
-              value={input}
-              onChange={handleTyping}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              className="w-full outline-0 text-white/90 bg-transparent"
-              placeholder="Write a message..."
-            />
-            <ChatButton icon={isRecording ? icons.micRecording : icons.mic} onClick={handleMicClick} />
-            <ChatButton icon={icons.send} onClick={sendMessage}/>
+          {/* INPUT AREA */}
+          <div className="mt-4 bg-white/10 rounded-3xl pl-6 py-2 pr-3 flex items-center gap-2 shrink-0 min-h-[56px]">
+            {recordingState === "idle" && (
+              <>
+                <input
+                  value={input}
+                  onChange={handleTyping}
+                  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                  className="w-full outline-0 text-white/90 bg-transparent"
+                  placeholder="Write a message..."
+                />
+                <ChatButton icon={icons.mic} onClick={startRecording} />
+                <ChatButton icon={icons.send} onClick={sendMessage}/>
+              </>
+            )}
+
+            {recordingState === "recording" && (
+              <div className="flex-1 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  <span className="text-red-400 text-sm font-medium">Recording...</span>
+                </div>
+                <div className="flex gap-2">
+                  <ChatButton icon={icons.cancel} onClick={cancelRecording} />
+                  <ChatButton icon={icons.stop} onClick={finishRecording} />
+                </div>
+              </div>
+            )}
+
+            {recordingState === "previewing" && audioPreviewUrl && (
+              <AudioPreview 
+                url={audioPreviewUrl}
+                isInput={true}
+                onCancel={cancelRecording} 
+                onSend={uploadAndSendVoice} 
+              />
+            )}
           </div>
         </>
       )}
