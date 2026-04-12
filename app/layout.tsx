@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stash AI",
-  description: "AI-assisted work chat",
+  title: "Stash",
+  description: "An AI-powered collaboration tool for developers",
 };
 
 export default function RootLayout({
