@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Work Buddy",
+  title: "Stash AI",
   description: "AI-assisted work chat",
 };
 
