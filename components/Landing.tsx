@@ -42,7 +42,6 @@ const Landing = () => {
         />
         <div className="absolute inset-0 bg-linear-to-r from-black via-transparent to-transparent hidden lg:block" />
       </div>
-
     </main>
   );
 };

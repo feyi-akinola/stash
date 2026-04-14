@@ -1,15 +1,16 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 type AuthSubmitButtonProps = {
   idleText: string;
+  pending: boolean;
   pendingText: string;
 };
 
-const AuthSubmitButton = ({ idleText, pendingText }: AuthSubmitButtonProps) => {
-  const { pending } = useFormStatus();
-
+const AuthSubmitButton = ({ idleText, pending, pendingText }: AuthSubmitButtonProps) => {
   return (
     <button
       type="submit"

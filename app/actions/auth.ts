@@ -9,46 +9,66 @@ const toMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
-export async function signUpAction(formData: FormData) {
+export async function signUpAction(_: any, formData: FormData) {
+  const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
-  const name = String(formData.get("name") ?? "").trim();
 
-  if (!email || !password || !name) {
-    redirect("/signup?error=Please%20fill%20all%20fields");
-  }
-
-  if (password.length < 8) {
-    redirect("/signup?error=Password%20must%20be%20at%20least%208%20characters");
+  if (!name || !email || !password) {
+    return { error: "Please fill all fields" };
   }
 
   try {
-    await auth.api.signUpEmail({
-      body: { email, password, name }
-    });
-    redirect("/");
+    await auth.api.signUpEmail({ body: { name, email, password } });
+    
+    return { success: true };
   } catch (error) {
-    const msg = toMessage(error, "Unable to sign up right now");
-    redirect(`/signup?error=${encodeURIComponent(msg)}`);
+    let msg = toMessage(error, "Invalid credentials");
+
+    if (password.length < 8) {
+      msg = "Password must be at least 8 characters";
+    }
+
+    if (
+      msg.includes("ENOTFOUND") ||
+      msg.includes("fetch failed") ||
+      msg.includes("network") ||
+      msg.includes("Failed to fetch")
+    ) {
+      msg = "Unable to sign up right now. Check your internet or try again later.";
+    }
+
+    return { error: msg };
   }
 };
 
-export async function signInAction(formData: FormData) {
+export async function signInAction(_: any, formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
-    redirect("/login?error=Please%20provide%20email%20and%20password");
+    return { error: "Please provide email and password" };
   }
 
   try {
     await auth.api.signInEmail({ body: { email, password } });
+    
     redirect("/");
   } catch (error) {
-    const msg = toMessage(error, "Invalid credentials");
-    redirect(`/login?error=${encodeURIComponent(msg)}`);
+    let msg = toMessage(error, "Invalid credentials");
+
+    if (
+      msg.includes("ENOTFOUND") ||
+      msg.includes("fetch failed") ||
+      msg.includes("network") ||
+      msg.includes("Failed to fetch")
+    ) {
+      msg = "Unable to connect. Check your internet or try again later.";
+    }
+
+    return { error: msg };
   }
-};
+}
 
 export async function signOutAction() {
   try {
@@ -57,7 +77,9 @@ export async function signOutAction() {
     });
   } catch (error) {
     const msg = toMessage(error, "Sign out failed");
-    redirect(`/chat?error=${encodeURIComponent(msg)}`);
+    
+    return msg;
   }
+
   redirect("/");
 };
