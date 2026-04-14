@@ -3,7 +3,7 @@ import { useState, useEffect, Dispatch, SetStateAction } from "react";
 import { supabase } from "@/lib/supabase";
 import { createRoom } from "@/app/actions/rooms";
 import { Room } from "@/types/types";
-import { Eye } from "lucide-react";
+import { Eye, RefreshCw } from "lucide-react";
 import { PuffLoader } from "react-spinners";
 
 type SidebarProps = {
@@ -15,23 +15,33 @@ type SidebarProps = {
 const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string>("");
 
-  useEffect(() => {
-    const fetchRooms = async () => {
-      try {
-        const { data } = await supabase
-          .from("room")
-          .select("*")
-          .order("created_at", { ascending: false });
+  const fetchRooms = async () => {
+    setLoading(true);
 
-        if (data) setRooms(data);
-      } catch (e) {
-        console.log(e);
-      } finally {
-        setLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from("room")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (data) {
+        setRooms(data);
+        setErrorMsg("");
+
+        return;
       }
-    };
-      
+
+      if (error) throw error;
+    } catch (e) {
+      setErrorMsg("Failed to load chats. Click to refresh");
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
     fetchRooms();
   }, []);
 
@@ -41,22 +51,38 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
   };
 
   return (
-    <div className="flex-1 min-h-0 bg-white/10 rounded-3xl p-4 flex flex-col gap-4 border-r
-      border-white/5">
-      <div className="flex-1 overflow-y-auto flex flex-col gap-2">
-        {
-          loading ? (
-            <div className="h-full flex-center">              
-              <PuffLoader color="#CFCFCF" loading={loading}/>
-            </div>
-          ) : (
-            <>
-              {rooms.length === 0 ? (
-                <div className="h-full flex-center">
-                  <p className="text-white/20 text-center mt-10">No chats yet</p>
-                </div>
-              ) : (
-                rooms.map((room) => (
+    <div className="flex-1 min-h-0 bg-white/10 rounded-3xl p-4 flex flex-col gap-4">
+      {
+        loading ? (
+          <div className="h-full flex-center">              
+            <PuffLoader color="#CFCFCF" loading={loading}/>
+          </div>
+        ) : errorMsg ? (
+          <div className="h-full flex-center flex-col gap-5">              
+            <p className="text-red-500 font-semibold text-sm bg-red-500/10 border px-4 py-2
+              border-red-500/30 rounded-xl text-center animate-in fade-in slide-in-from-top-2"
+            >
+              {errorMsg}
+            </p>
+            <p
+              onClick={() => fetchRooms()}
+              className="text-center flex gap-1.5 text-white/20 text-sm font-medium cursor-pointer"
+            >
+              <RefreshCw size={18}/>
+              <span>
+                Click to refresh
+              </span>
+            </p>
+          </div>
+        ) : (
+          <div className="h-full flex flex-col justify-between">
+            {rooms.length === 0 ? (
+              <div className="h-full flex-center">
+                <p className="text-white/20 text-center mt-10">No chats yet</p>
+              </div>
+            ) : (
+              <div className="h-full flex flex-col gap-4 overflow-y-auto scrollbar-thumb-only pr-1.5">                  
+                {rooms.map((room) => (
                   <div
                     key={room.id}
                     onClick={() => onSelectRoom(room.id)}
@@ -67,24 +93,22 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
                       # {room.name}
                     </p>
 
-                    {
-                      currentRoomId === room.id &&
-                        <Eye />
-                    }
+                    { currentRoomId === room.id && <Eye /> }
                   </div>
-                ))
-              )}
-            </>
-          )
-        }
-      </div>
+                ))}
+              </div>
+            )}
 
-      <button
-        onClick={handleCreate}
-        className="bg-white text-black rounded-2xl p-4 font-bold hover:bg-zinc-200
-          transition-all">
-        Start New Chat
-      </button>
+            <button
+              onClick={handleCreate}
+              disabled={errorMsg.length > 0}
+              className="bg-white text-black rounded-2xl p-4 font-bold hover:bg-zinc-200
+                transition-all">
+              Start New Chat
+            </button>
+          </div>
+        )
+      }
     </div>
   );
 };

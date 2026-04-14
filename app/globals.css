@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent: #4d4d4d;
 }
 
 @theme inline {
@@ -40,17 +41,23 @@ body {
     duration-300;
   }
 
-  .scrollbar-hidden {
-    -ms-overflow-style: none; /* IE & Edge */
-    scrollbar-width: none; /* Firefox */
+  .scrollbar-thumb-only {
+    scrollbar-color: var(--accent) transparent;
+    scrollbar-width: thin;
   }
 
-  .scrollbar-hidden {
-    -ms-overflow-style: none; /* IE & Edge */
-    scrollbar-width: none; /* Firefox */
+  .scrollbar-thumb-only::-webkit-scrollbar {
+    width: 8px;
   }
 
-  .scrollbar-hidden::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, Opera */
+  .scrollbar-thumb-only::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thumb-only::-webkit-scrollbar-thumb {
+    background-color: var(--accent);
+    border-radius: 20px;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
 }
