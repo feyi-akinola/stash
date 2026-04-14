@@ -1,7 +1,7 @@
 "use client";
 import Chat from "@/components/Chat";
 import Sidebar from "@/components/Sidebar";
-import { signOutAction } from "../actions/auth";
+import { signOutAction } from "@/app/actions/auth";
 import { useState } from "react";
 import { useUserStore } from "@/store/userStore";
 import SignOutSubmitButton from "@/components/SignOutSubmitButton";

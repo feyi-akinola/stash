@@ -10,6 +10,6 @@ export async function createRoom(name: string, userId: string) {
     .single();
 
   if (error) throw new Error(error.message);
-  revalidatePath("/chat");
+  revalidatePath("/");
   return data;
 }
