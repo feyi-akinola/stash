@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -52,8 +53,6 @@ export async function signInAction(_: any, formData: FormData) {
 
   try {
     await auth.api.signInEmail({ body: { email, password } });
-    
-    redirect("/");
   } catch (error) {
     let msg = toMessage(error, "Invalid credentials");
 
@@ -68,6 +67,10 @@ export async function signInAction(_: any, formData: FormData) {
 
     return { error: msg };
   }
+
+  
+  revalidatePath("/");
+  redirect("/");
 }
 
 export async function signOutAction() {
