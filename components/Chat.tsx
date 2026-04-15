@@ -1,5 +1,5 @@
 "use client";
-import { Mic, Play, Send, Square, Trash2 } from "lucide-react";
+import { Mic, Send, Square, Trash2, X } from "lucide-react";
 import ChatButton from "./ChatButton";
 import { useMemo, Dispatch, ReactElement, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -8,6 +8,7 @@ import { Message, TempMessage } from "@/types/types";
 import { BeatLoader, PuffLoader } from "react-spinners";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import AudioPreview from "./AudioPreview";
+import toast, { Toaster } from "react-hot-toast";
 
 const icons: Record<string, ReactElement> = {
   mic: <Mic className="text-white/70 w-5 h-5"/>,
@@ -49,8 +50,6 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const [input, setInput] = useState<string>("");
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
-  
-  const [isRecording, setIsRecording] = useState(false);
 
   type RecordingState = "idle" | "recording" | "previewing";
 
@@ -69,12 +68,36 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const audioChunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [failedChat, setFailedChat] = useState<string | null>(null);
+
   // --- HELPERS ---
+
+  const triggerErrorToast = (message: string) => {
+    toast.custom((t) => (
+      <div className={`rounded-xl animate-in fade-in slide-in-from-top-2 flex-center
+        ${t.visible ? 'animate-custom-enter' : 'animate-custom-leave'} px-4 py-2
+        bg-[#1f0200] border border-red-500/20 gap-4`}
+      >
+        <p className="text-sm font-semibold text-red-400">
+          {message}
+        </p>
+
+        <button
+          onClick={() => toast.dismiss(t.id)}
+          className="p-1 rounded-full bg-red-500 text-white cursor-pointer"
+        >
+          <X size={16}/>
+        </button>
+      </div>
+    ));
+  };
 
   const startRecording = async () => {
     try {
       stopTyping();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
@@ -96,8 +119,12 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
       recorder.start();
       setRecordingState("recording");
-    } catch (err) {
-      console.error("Mic error:", err);
+    } catch (err: any) {
+      if (err.name === "NotAllowedError") {
+        triggerErrorToast("Microphone access denied. Please check your browser settings.");
+      } else {
+        triggerErrorToast("Could not start recording.");
+      }
     }
   };
 
@@ -122,10 +149,9 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
   const uploadAndSendVoice = async () => {
     if (!recordedBlob || !selectedRoom) return;
-
-    const fileName = `${userId}/${Date.now()}.webm`;
-    const tempPreview = audioPreviewUrl;
     
+    const tempPreview = audioPreviewUrl;
+
     setRecordingState("idle");
     setAudioPreviewUrl(null);
     setRecordedBlob(null);
@@ -144,36 +170,36 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     setMessages(prev => [...prev, optimistic]);
 
     try {
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("voice-messages")
-        .upload(fileName, recordedBlob);
+      // get signed upload url
+      const urlRes = await fetch("/api/voice/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: selectedRoom }),
+      });
+      if (!urlRes.ok) throw new Error("Failed to create signed upload URL");
+      const { path, token } = await urlRes.json();
 
+      // upload blob directly from browser to storage
+      const { error: uploadError } = await supabase.storage
+        .from("voice-messages")
+        .uploadToSignedUrl(path, token, recordedBlob);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("voice-messages")
-        .getPublicUrl(fileName);
+      // commit message row
+      const commitRes = await fetch("/api/voice/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: selectedRoom, path }),
+      });
+      if (!commitRes.ok) throw new Error("Failed to save voice message");
+      const { message } = await commitRes.json();
 
-      const { data, error: dbError } = await supabase
-        .from("message")
-        .insert({
-          room_id: selectedRoom,
-          content: publicUrl,
-          sender_id: userId,
-          role: 1,
-          message_type: 2,
-        })
-        .select()
-        .single();
-
-      if (dbError) throw dbError;
-
-      if (data) {
-        setMessages(prev => prev.map(msg => msg.id === tempId ? data : msg));
-      }
+      setMessages(prev => prev.map(msg => (msg.id === tempId ? message : msg)));
     } catch (err) {
-      console.error("Voice send error:", err);
-      setMessages(prev => prev.filter(msg => msg.id !== tempId));
+      setMessages(prev => prev.map(msg => 
+        msg.id === tempId ? { ...msg, sending: false, error: true } : msg
+      ));
+      triggerErrorToast("Failed to upload voice message.");
     }
   };
 
@@ -262,13 +288,20 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     try {
       const from = pageNumber * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
+      
+      const res = await fetch("/api/message/getMessages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          room_id: selectedRoom,
+          from,
+          to,
+        }),
+      });
 
-      const { data } = await supabase
-        .from("message")
-        .select("*")
-        .eq("room_id", selectedRoom)
-        .order("created_at", { ascending: false })
-        .range(from, to);
+      if (!res.ok) throw new Error;
+      
+      const { data } = await res.json();
 
       if (data) {
         const reversed = [...data].reverse();
@@ -285,7 +318,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
         if (data.length < PAGE_SIZE) setHasMore(false);
       }
     } catch (e) {
-      console.error(e);
+      setPageError("Failed to load messages. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -301,100 +334,6 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       fetchMessages(nextPage);
     }
   };
-
-  const blobToDataUrl = useCallback((blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(String(reader.result));
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }, []);
-
-  const sendVoiceMessage = useCallback(async (audioDataUrl: string) => {
-    if (!selectedRoom) return;
-
-    const tempId = `voice-temp-${crypto.randomUUID()}`;
-    const optimisticVoiceMessage: TempMessage = {
-      id: tempId,
-      content: audioDataUrl,
-      created_at: new Date().toISOString(),
-      sender_id: userId,
-      role: 1,
-      room_id: selectedRoom,
-      message_type: 2,
-      sending: true,
-    };
-    setMessages(prev => [...prev, optimisticVoiceMessage]);
-
-    const { data } = await supabase
-      .from("message")
-      .insert({
-        room_id: selectedRoom,
-        content: audioDataUrl,
-        sender_id: userId,
-        role: 1,
-        message_type: 2,
-      })
-      .select()
-      .single();
-
-    if (data) {
-      setMessages(prev => prev.map(msg => (msg.id === tempId ? data : msg)));
-    } else {
-      setMessages(prev => prev.filter(msg => msg.id !== tempId));
-    }
-  }, [selectedRoom, userId]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    setIsRecording(false);
-  }, []);
-
-  const handleMicClick = useCallback(async () => {
-    if (isRecording) {
-      stopRecording();
-      return;
-    }
-
-    try {
-      stopTyping();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        try {
-          const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
-          if (audioBlob.size === 0) return;
-          const audioDataUrl = await blobToDataUrl(audioBlob);
-          await sendVoiceMessage(audioDataUrl);
-        } catch (error) {
-          console.error("Failed to send voice message", error);
-        }
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Microphone access failed", error);
-      setIsRecording(false);
-    }
-  }, [blobToDataUrl, sendVoiceMessage, stopRecording, stopTyping]);
 
   const buildAiHistory = useCallback(
     (latestUserInput: string) => {
@@ -419,139 +358,159 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     [messages, selectedRoom, userId]
   );
 
-  const sendMessage = async () => {
-    if (!input.trim() || !selectedRoom) return;
-    
-    const content = input.trim();
-    const isAiCommand = AI_COMMAND_REGEX.test(content);
-    const aiPrompt = content.replace(AI_COMMAND_REGEX, "").trim();
-    if (isAiCommand && !aiPrompt) return;
-    setInput("");
+  const sendMessage = async (message?: Message) => {
+    let optimisticMessage: TempMessage;
+    let content, tempId, isAiCommand, aiPrompt;
 
-    stopTyping(); 
+    if (!message) {
+      if (!input.trim() || !selectedRoom) return;
+      
+      content = input.trim();
+      isAiCommand = AI_COMMAND_REGEX.test(content);
+      tempId = crypto.randomUUID();
+      aiPrompt = content.replace(AI_COMMAND_REGEX, "").trim();
 
-    const tempId = crypto.randomUUID();
-    const optimisticMessage: TempMessage = {
-      id: tempId,
-      content,
-      created_at: new Date().toISOString(),
-      sender_id: userId,
-      role: 1,
-      room_id: selectedRoom,
-      message_type: 1,
-      sending: true,
-    };
-
-    setMessages(prev => [...prev, optimisticMessage]);
-
-    const { data } = await supabase
-      .from("message")
-      .insert({
-        room_id: selectedRoom,
+      if (isAiCommand && !aiPrompt) return;
+      
+      setInput("");
+      stopTyping();
+  
+      optimisticMessage = {
+        id: tempId,
         content,
-        sender_id: userId,
-        role: 1,
-        message_type: 1
-      })
-      .select()
-      .single();
-
-    if (data) {
-      setMessages(prev => prev.map(msg => msg.id === tempId ? data : msg));
-    }
-
-    if (isAiCommand) {
-      const history = buildAiHistory(content);
-      const aiTempId = `ai-temp-${crypto.randomUUID()}`;
-      const aiOptimisticMessage: TempMessage = {
-        id: aiTempId,
-        content: "",
         created_at: new Date().toISOString(),
         sender_id: userId,
-        role: 2,
+        role: 1,
         room_id: selectedRoom,
         message_type: 1,
         sending: true,
       };
-      setMessages(prev => [...prev, aiOptimisticMessage]);
 
-      try {
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: aiPrompt,
-            roomId: selectedRoom,
-            userId,
-            history,
-          }),
-        });
+      setMessages(prev => [...prev, optimisticMessage]);
+    } else {
+      setFailedChat(null);
 
-        if (!response.ok || !response.body) {
+      optimisticMessage = {
+        ...message,
+        sending: true,
+      };
+
+      tempId = message.id;
+      content = message.content;
+    }
+
+    try {
+      const res = await fetch("/api/message/sendMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          room_id: selectedRoom,
+          content,
+          message_type: 1,
+          role: 1
+        }),
+      });
+
+      if (!res.ok) throw new Error;
+      
+      const { data } = await res.json();
+
+      if (data) {
+        const sentMessage = {
+          ...data,
+          sending: false,
+        };
+
+        setMessages(prev => prev.map(msg => msg.id === tempId ? sentMessage : msg));
+      }
+
+      if (isAiCommand) {
+        const aiTempId = `ai-temp-${crypto.randomUUID()}`;
+
+        try {
+          const history = buildAiHistory(content);
+          const aiOptimisticMessage: TempMessage = {
+            id: aiTempId,
+            content: "",
+            created_at: new Date().toISOString(),
+            sender_id: userId,
+            role: 2,
+            room_id: selectedRoom as string,
+            message_type: 1,
+            sending: true,
+          };
+          
+          setMessages(prev => [...prev, aiOptimisticMessage]);
+  
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: aiPrompt,
+              roomId: selectedRoom,
+              userId,
+              history,
+            }),
+          });
+          
+          if (!response.ok || !response.body) throw new Error("AI Offline");
+  
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let accumulated = "";
+  
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            accumulated += decoder.decode(value, { stream: true });
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === aiTempId
+                  ? { ...msg, content: accumulated, sending: false }
+                  : msg
+              )
+            );
+          }
+  
+          const finalChunk = decoder.decode();
+  
+          if (finalChunk) {
+            accumulated += finalChunk;
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === aiTempId
+                  ? { ...msg, content: accumulated, sending: false }
+                  : msg
+              )
+            );
+          }
+        } catch (e) {
           setMessages(prev =>
             prev.map(msg =>
               msg.id === aiTempId
                 ? {
                     ...msg,
-                    content: "AI request failed. Please try again.",
+                    content: "⚠️AI request failed. Please try again.",
                     sending: false,
                   }
                 : msg
             )
           );
-          return;
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          accumulated += decoder.decode(value, { stream: true });
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiTempId
-                ? { ...msg, content: accumulated, sending: false }
-                : msg
-            )
-          );
-        }
-
-        const finalChunk = decoder.decode();
-        if (finalChunk) {
-          accumulated += finalChunk;
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiTempId
-                ? { ...msg, content: accumulated, sending: false }
-                : msg
-            )
-          );
-        }
-      } catch (error) {
-        console.error("Failed to trigger AI response", error);
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === aiTempId
-              ? {
-                  ...msg,
-                  content: "AI request failed. Please try again.",
-                  sending: false,
-                }
-              : msg
-          )
-        );
       }
+    } catch (error) {
+      setFailedChat(tempId);
     }
   };
 
   // --- EFFECTS ---
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setSelectedRoom(undefined); };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedRoom(undefined);
+    };
     window.addEventListener("keydown", handleEsc);
+
     return () => window.removeEventListener("keydown", handleEsc);
   }, [setSelectedRoom]);
 
@@ -561,6 +520,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       setIsOtherTyping(false);
       return;
     }
+
     setMessages([]);
     setPage(0);
     setHasMore(true);
@@ -679,6 +639,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       if (mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.stop();
       }
+
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -697,77 +658,93 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
         </div>
       ) : (
         <>
-          <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            className="flex-1 min-h-0 overflow-y-auto flex flex-col p-1 scrollbar-hidden"
-          >
-            <div className="flex-1" /> 
-            <div className="flex flex-col gap-6">
-              {messages.map((message) => (
-                <ChatBubble 
-                  key={message.id} 
-                  message={message} 
-                  isSent={message.sender_id === userId && message.role !== 2}
-                  senderName={
-                    message.role === 2
-                      ? undefined
-                      : message.sender_id === userId
-                        ? userName
-                        : senderNames[message.sender_id] ?? "Teammate"
-                  }
-                />
-              ))}
-            </div>
-            
-            {/* OTHER PERSON IS TYPING BUBBLE */}
-            {isOtherTyping && (
-              <div className="p-2 self-start bg-white/5 rounded-full px-4 mt-2">
-                <BeatLoader size={5} color="#CFCFCF" />
+          {
+            pageError ? (
+              <div className="h-full flex-center">
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-xl text-sm animate-in fade-in slide-in-from-top-2">
+                  {pageError}
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* INPUT AREA */}
-          <div className="mt-4 bg-white/10 rounded-3xl pl-6 py-2 pr-3 flex items-center gap-2 shrink-0 min-h-[56px]">
-            {recordingState === "idle" && (
+            ) : (
               <>
-                <input
-                  value={input}
-                  onChange={handleTyping}
-                  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                  className="w-full outline-0 text-white/90 bg-transparent"
-                  placeholder="Write a message..."
-                />
-                <ChatButton icon={icons.mic} onClick={startRecording} />
-                <ChatButton icon={icons.send} onClick={sendMessage}/>
+                <div
+                  ref={containerRef}
+                  onScroll={handleScroll}
+                  className="flex-1 min-h-0 overflow-y-auto flex flex-col p-1 scrollbar-thumb-only pr-2"
+                >
+                  <div className="flex-1" /> 
+                  <div className="flex flex-col gap-6">
+                    {messages.map((message) => (
+                      <ChatBubble 
+                        key={message.id} 
+                        message={message} 
+                        isSent={message.sender_id === userId && message.role !== 2}
+                        failed={failedChat}
+                        sendMessage={sendMessage}
+                        senderName={
+                          message.role === 2
+                            ? undefined
+                            : message.sender_id === userId
+                              ? userName
+                              : senderNames[message.sender_id] ?? "Teammate"
+                        }
+                      />
+                    ))}
+                  </div>
+                  
+                  {/* OTHER PERSON IS TYPING BUBBLE */}
+                  {isOtherTyping && (
+                    <div className="p-2 self-start bg-white/5 rounded-full px-4 mt-2">
+                      <BeatLoader size={5} color="#CFCFCF" />
+                    </div>
+                  )}
+                </div>
+
+                {/* INPUT AREA */}
+                <div className="mt-4 bg-white/10 rounded-3xl pl-6 py-2 pr-3 flex items-center gap-2 shrink-0 min-h-[56px]">
+                  {recordingState === "idle" && (
+                    <>
+                      <input
+                        value={input}
+                        onChange={handleTyping}
+                        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                        className="w-full outline-0 text-white/90 bg-transparent"
+                        placeholder="Write a message..."
+                      />
+                      <ChatButton icon={icons.mic} onClick={startRecording} />
+                      <ChatButton icon={icons.send} onClick={() => sendMessage()}/>
+                    </>
+                  )}
+
+                  {recordingState === "recording" && (
+                    <div className="flex-1 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                        <span className="text-red-400 text-sm font-medium">Recording...</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <ChatButton icon={icons.cancel} onClick={cancelRecording} />
+                        <ChatButton icon={icons.stop} onClick={finishRecording} />
+                      </div>
+                    </div>
+                  )}
+
+                  {recordingState === "previewing" && audioPreviewUrl && (
+                    <AudioPreview 
+                      url={audioPreviewUrl}
+                      isInput={true}
+                      onCancel={cancelRecording} 
+                      onSend={uploadAndSendVoice} 
+                    />
+                  )}
+                </div>
               </>
-            )}
-
-            {recordingState === "recording" && (
-              <div className="flex-1 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                  <span className="text-red-400 text-sm font-medium">Recording...</span>
-                </div>
-                <div className="flex gap-2">
-                  <ChatButton icon={icons.cancel} onClick={cancelRecording} />
-                  <ChatButton icon={icons.stop} onClick={finishRecording} />
-                </div>
-              </div>
-            )}
-
-            {recordingState === "previewing" && audioPreviewUrl && (
-              <AudioPreview 
-                url={audioPreviewUrl}
-                isInput={true}
-                onCancel={cancelRecording} 
-                onSend={uploadAndSendVoice} 
-              />
-            )}
-          </div>
+            )
+          }
         </>
       )}
+
+      <Toaster position="top-right"/>
     </div>
   );
 };

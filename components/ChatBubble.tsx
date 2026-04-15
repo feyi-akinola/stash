@@ -1,10 +1,10 @@
  "use client";
 import { timeAgo } from "@/lib/time";
-import { Message } from "@/types/types";
+import { Message, TempMessage } from "@/types/types";
 import { BeatLoader } from "react-spinners";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Play, Square } from "lucide-react";
+import { Bot, Info, Play, Square, Trash2 } from "lucide-react";
 import { ComponentPropsWithoutRef, useCallback, useEffect, useMemo, useState } from "react";
 import AudioPreview from "./AudioPreview";
 
@@ -12,17 +12,20 @@ type ChatBubbleProps = {
   message: Message & { sending?: boolean };
   isSent: boolean;
   senderName?: string;
+  failed: string | null;
+  sendMessage: (message?: Message | TempMessage) => Promise<void>;
 }
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
   inline?: boolean;
 };
 
-const ChatBubble = ({ message, isSent, senderName } : ChatBubbleProps) => {
+const ChatBubble = ({ message, isSent, senderName, failed, sendMessage } : ChatBubbleProps) => {
   const alignment: string = isSent ? "end" : "start";
   const isAiMessage = message.role === 2;
   const bgColor: string = isSent ? "#FFFFFF" : isAiMessage ? "#dff7ff" : "#bff5ff";
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [hasFailed, setHasFailed] = useState<boolean>(failed === message.id);
 
   const { created_at, content, sending } = message; 
   const isVoiceMessage = message.message_type === 2;
@@ -61,6 +64,10 @@ const ChatBubble = ({ message, isSent, senderName } : ChatBubbleProps) => {
   }, [isSpeaking, speechText]);
 
   useEffect(() => {
+    setHasFailed(failed === message.id);
+  }, [failed]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     return () => {
       if ("speechSynthesis" in window) {
@@ -69,34 +76,35 @@ const ChatBubble = ({ message, isSent, senderName } : ChatBubbleProps) => {
     };
   }, []);
 
+  const retry = async () => {
+    await sendMessage(message);
+  }
+
   return (
     <div
       style={{
         alignSelf: alignment,
-        alignItems:  alignment,
+        alignItems: alignment,
       }}
       className="flex flex-col gap-1.5 max-w-[78%]"
     >
-      { 
-        sending
-          ? <BeatLoader size={8} color="#CFCFCF"/>
-          : (
-              <p className="text-xs font-semibold text-zinc-600">
-                {
-                  isAiMessage
-                    ? timeAgo(created_at)
-                    : (
-                      <>
-                        <span className="text-white/70 font-semibld">
-                          {`${senderName ?? "User"}`}
-                        </span>
-                        {` • ${timeAgo(created_at)}`}
-                      </>
-                      )
-                }
-              </p>
-            )
-      }
+      {hasFailed ?
+        <div onClick={retry} className="text-red-500 flex gap-1 cursor-pointer
+          hover:text-amber-400 transition-all duration-200">
+          <Info size={16} />
+          <p className="text-xs">Click to retry</p>
+        </div>
+        : sending ? <BeatLoader size={8} color="#CFCFCF"/>
+          : <p className="text-xs font-semibold text-zinc-600">
+              {isAiMessage
+                ? timeAgo(created_at)
+                : <>
+                    <span className="text-white/70 font-semibold">
+                      {`${senderName ?? "User"}`}
+                    </span>
+                    {` • ${timeAgo(created_at)}`}
+                  </>}
+            </p>}
 
       <div
         style={{

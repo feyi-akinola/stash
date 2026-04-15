@@ -21,19 +21,21 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from("room")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const res = await fetch("/api/room", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
 
+      if (!res.ok) throw new Error;
+      
+      const { data } = await res.json();
+      
       if (data) {
         setRooms(data);
         setErrorMsg("");
 
         return;
       }
-
-      if (error) throw error;
     } catch (e) {
       setErrorMsg("Failed to load chats. Click to refresh");
     } finally {
