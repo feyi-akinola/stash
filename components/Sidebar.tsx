@@ -3,7 +3,7 @@ import { useState, useEffect, Dispatch, SetStateAction } from "react";
 import { supabase } from "@/lib/supabase";
 import { createRoom } from "@/app/actions/rooms";
 import { Room } from "@/types/types";
-import { Eye, RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { PuffLoader } from "react-spinners";
 
 type SidebarProps = {
@@ -82,20 +82,35 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
               </div>
             ) : (
               <div className="h-full flex flex-col gap-4 overflow-y-auto scrollbar-thumb-only pr-1.5">                  
-                {rooms.map((room) => (
-                  <div
-                    key={room.id}
-                    onClick={() => onSelectRoom(room.id)}
-                    className={`bg-black px-4 py-6 rounded-xl cursor-pointer transition-all 
-                      duration-200 flex items-center gap-4 hover:bg-white/5 text-white/60`}
-                  >
-                    <p className="w-full">
-                      # {room.name}
-                    </p>
+                {rooms.map((room) => {
+                  const isRoomSelected = currentRoomId === room.id;
 
-                    { currentRoomId === room.id && <Eye /> }
-                  </div>
-                ))}
+                  return (
+                    <div
+                      key={room.id}
+                      onClick={() => onSelectRoom(room.id)}
+                      className={`bg-black px-8 py-6 rounded-2xl transition-all 
+                        duration-200 flex items-center gap-4 hover:bg-white/5 text-white/60
+                        ${isRoomSelected ? "border-2 border-zinc-400 m-1 p-1 cursor-auto" : "cursor-pointer"}`}
+                    >
+                      <p className="w-full">
+                        {room.name}
+                      </p>
+
+                      {isRoomSelected &&
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation(); // prevents parent click
+                            onSelectRoom(undefined);
+                          }}
+                          className="bg-white text-black p-1.5 rounded-full cursor-pointer"
+                        >
+                          <X size={16}/>
+                        </button>
+                      }
+                    </div>
+                  )
+                })}
               </div>
             )}
 
