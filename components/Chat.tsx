@@ -31,6 +31,12 @@ type TypingPresence = {
   ts?: number;
 };
 
+type RecordingState = "idle" | "recording" | "previewing";
+
+type InputToken =
+| { type: "text"; value: string }
+| { type: "command"; value: "@ai" };
+
 const useSessionId = () => useMemo(() => crypto.randomUUID(), []);
 const AI_COMMAND_REGEX = /^@ai\b/i;
 
@@ -51,7 +57,9 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
 
-  type RecordingState = "idle" | "recording" | "previewing";
+  const [tokens, setTokens] = useState<InputToken[]>([
+    { type: "text", value: "" }
+  ]);
 
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
@@ -70,6 +78,11 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
   const [pageError, setPageError] = useState<string | null>(null);
   const [failedChat, setFailedChat] = useState<string | null>(null);
+
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const [commandFilter, setCommandFilter] = useState("");
 
   // --- HELPERS ---
 
@@ -254,9 +267,36 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     setIsOtherTyping(anyoneElseTyping);
   }, [presenceKey, userId, TYPING_STALE_MS]);
 
+  // const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+  //   const value = e.target.value;
+  
+  //   const parts = value.split(/(@ai\b)/i).filter(Boolean);
+  
+  //   const newTokens: InputToken[] = parts.map((part) => {
+  //     if (part.toLowerCase() === "@ai") {
+  //       return { type: "command", value: "@ai" };
+  //     }
+  //     return { type: "text", value: part };
+  //   });
+  
+  //   setTokens(newTokens);
+  //   setInput(""); // input just used for typing buffer
+  // };
+
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    setInput(value);
+  
+    const parts = value.split(/(@ai\b)/i).filter(Boolean);
+  
+    const newTokens: InputToken[] = parts.map((part) => {
+      if (part.toLowerCase() === "@ai") {
+        return { type: "command", value: "@ai" };
+      }
+      return { type: "text", value: part };
+    });
+  
+    setTokens(newTokens);
+    setInput("");
 
     if (!channelRef.current) return;
 
@@ -279,6 +319,248 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     } else {
       stopTyping();
     }
+  };
+
+  const insertAIChip = () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+  
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+  
+    const chip = document.createElement("span");
+    chip.textContent = "@ai";
+    chip.contentEditable = "false";
+    chip.className =
+      "px-2 py-0.5 mx-1 bg-blue-500/20 text-blue-300 rounded-full text-sm inline-flex items-center";
+  
+    range.insertNode(chip);
+  
+    // move cursor after chip
+    const space = document.createTextNode(" ");
+    chip.after(space);
+  
+    range.setStartAfter(space);
+    range.setEndAfter(space);
+  
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+
+  const replaceLastAI = () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+  
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+  
+    if (node.nodeType !== Node.TEXT_NODE) return;
+  
+    const textNode = node as Text;
+    const text = textNode.textContent || "";
+  
+    const match = text.slice(0, range.startOffset).match(/@ai$/);
+    if (!match) return;
+  
+    const start = range.startOffset - match[0].length;
+  
+    // split text node
+    const before = text.slice(0, start);
+    const after = text.slice(range.startOffset);
+  
+    const beforeNode = document.createTextNode(before);
+    const afterNode = document.createTextNode(after);
+  
+    const chip = document.createElement("span");
+    chip.textContent = "@ai";
+    chip.contentEditable = "false";
+    chip.className =
+      "px-2 py-0.5 mx-1 bg-blue-500/20 text-blue-300 rounded-full text-sm";
+  
+    const parent = textNode.parentNode!;
+    parent.insertBefore(beforeNode, textNode);
+    parent.insertBefore(chip, textNode);
+    parent.insertBefore(afterNode, textNode);
+    parent.removeChild(textNode);
+  
+    // move cursor after chip
+    const newRange = document.createRange();
+    newRange.setStart(afterNode, 0);
+    newRange.setEnd(afterNode, 0);
+  
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  };
+
+  const handleInput = () => {
+    const el = editorRef.current;
+    if (!el) return;
+  
+    const text = el.innerText;
+  
+    // detect last typed "@ai "
+    if (/@ai$/.test(text)) {
+      replaceLastAI();
+    }
+    
+    // --- detect @word for command menu ---
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const node = range.startContainer;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textNode = node as Text;
+        const before = (textNode.textContent || "").slice(0, range.startOffset);
+        const match = before.match(/@(\w*)$/);
+        if (match) {
+          setShowCommandMenu(true);
+          setCommandFilter(match[1]); // characters after "@"
+        } else {
+          setShowCommandMenu(false);
+          setCommandFilter("");
+        }
+      } else {
+        setShowCommandMenu(false);
+        setCommandFilter("");
+      }
+    }
+
+    if (!channelRef.current) return;
+
+    if (text.trim().length > 0) {
+      isTypingRef.current = true;
+
+      const now = Date.now();
+      if (now - lastTypingTrackRef.current > 800) {
+        channelRef.current.track({
+          user: userId,
+          sessionId,
+          typing: true,
+          ts: now
+        });
+        lastTypingTrackRef.current = now;
+      }
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(stopTyping, TYPING_IDLE_MS);
+    } else {
+      stopTyping();
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Backspace") {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+    
+      const range = sel.getRangeAt(0);
+      let node = range.startContainer;
+    
+      // Only care about text nodes at the caret
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textNode = node as Text;
+    
+        // Case 1: we're at the very start of this text node
+        if (range.startOffset === 0) {
+          // walk backwards to find previous non-whitespace sibling
+          let prev: ChildNode | null = textNode.previousSibling;
+          while (prev && prev.nodeType === Node.TEXT_NODE && !prev.textContent?.trim()) {
+            prev = prev.previousSibling;
+          }
+    
+          if (prev instanceof HTMLElement && prev.textContent === "@ai") {
+            e.preventDefault();
+            prev.remove();
+            return;
+          }
+        }
+    
+        // Case 2: we're right after a space that follows the chip
+        if (range.startOffset === 1 && textNode.textContent === " ") {
+          let prev: ChildNode | null = textNode.previousSibling;
+          while (prev && prev.nodeType === Node.TEXT_NODE && !prev.textContent?.trim()) {
+            prev = prev.previousSibling;
+          }
+    
+          if (prev instanceof HTMLElement && prev.textContent === "@ai") {
+            e.preventDefault();
+            prev.remove();
+            return;
+          }
+        }
+      }
+    }
+  
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const insertAICommandFromMenu = () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+  
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+  
+    const textNode = node as Text;
+    const text = textNode.textContent || "";
+    const before = text.slice(0, range.startOffset);
+    const after = text.slice(range.startOffset);
+  
+    const match = before.match(/@(\w*)$/);
+    if (!match) return;
+  
+    const start = before.length - match[0].length;
+    const beforeWord = before.slice(0, start);
+  
+    const beforeNode = document.createTextNode(beforeWord);
+    const afterNode = document.createTextNode(after);
+  
+    const chip = document.createElement("span");
+    chip.textContent = "@ai";
+    chip.contentEditable = "false";
+    chip.className =
+      "px-2 py-0.5 mx-1 bg-blue-500/20 text-blue-300 rounded-full text-sm inline-flex items-center";
+  
+    const parent = textNode.parentNode!;
+    parent.insertBefore(beforeNode, textNode);
+    parent.insertBefore(chip, textNode);
+    parent.insertBefore(afterNode, textNode);
+    parent.removeChild(textNode);
+  
+    // move cursor after chip
+    const newRange = document.createRange();
+    newRange.setStart(afterNode, 0);
+    newRange.setEnd(afterNode, 0);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  
+    setShowCommandMenu(false);
+    setCommandFilter("");
+  };
+
+  const getMessage = () => {
+    const el = editorRef.current;
+    if (!el) return { text: "", isAI: false };
+  
+    let text = "";
+    let isAI = false;
+  
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent;
+      } else if (node instanceof HTMLElement) {
+        if (node.textContent === "@ai") {
+          isAI = true;
+          text += "@ai ";
+        }
+      }
+    });
+  
+    return { text: text.trim(), isAI };
   };
 
   const fetchMessages = useCallback(async (pageNumber: number) => {
@@ -359,13 +641,22 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   );
 
   const sendMessage = async (message?: Message) => {
+    const { text, isAI } = getMessage();
+  
+    if (!text) return;
+  
+    console.log({ text, isAI });
+  
+    // clear editor
+    if (editorRef.current) editorRef.current.innerHTML = "";
+
     let optimisticMessage: TempMessage;
     let content, tempId, isAiCommand, aiPrompt;
 
     if (!message) {
-      if (!input.trim() || !selectedRoom) return;
+      if (!text.trim() || !selectedRoom) return;
       
-      content = input.trim();
+      content = text.trim();
       isAiCommand = AI_COMMAND_REGEX.test(content);
       tempId = crypto.randomUUID();
       aiPrompt = content.replace(AI_COMMAND_REGEX, "").trim();
@@ -704,13 +995,28 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
                 <div className="mt-4 bg-white/10 rounded-3xl pl-6 py-2 pr-3 flex items-center gap-2 shrink-0 min-h-[56px]">
                   {recordingState === "idle" && (
                     <>
-                      <input
-                        value={input}
-                        onChange={handleTyping}
-                        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                        className="w-full outline-0 text-white/90 bg-transparent"
-                        placeholder="Write a message..."
-                      />
+                      <div className="relative w-full">
+                        <div
+                          ref={editorRef}
+                          contentEditable
+                          onInput={handleInput}
+                          onKeyDown={handleKeyDown}
+                          className="w-full outline-0 text-white/90 bg-transparent"
+                          data-placeholder="Write a message..."
+                        />
+                        {showCommandMenu && (
+                          <div className="absolute bottom-full left-0 mb-2 w-56 rounded-xl bg-black/90 border border-white/10 shadow-lg p-2 text-sm">
+                            <button
+                              type="button"
+                              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-white/10 cursor-pointer flex flex-col gap-0.5"
+                              onClick={insertAICommandFromMenu}
+                            >
+                              <span className="font-semibold text-white">@ai</span>
+                              <span className="text-xs text-white/60">Ask the assistant about this chat</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <ChatButton icon={icons.mic} onClick={startRecording} />
                       <ChatButton icon={icons.send} onClick={() => sendMessage()}/>
                     </>

@@ -6,6 +6,11 @@
   --accent: #4d4d4d;
 }
 
+[contenteditable]:empty:before {
+  content: attr(data-placeholder);
+  color: rgba(255,255,255,0.3);
+} 
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
