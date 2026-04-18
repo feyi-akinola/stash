@@ -20,7 +20,9 @@ const icons: Record<string, ReactElement> = {
 
 type ChatProps = {
   selectedRoom: string | undefined;
+  externalLoading: boolean;
   setSelectedRoom: Dispatch<SetStateAction<string | undefined>>;
+  setExternalLoading: Dispatch<SetStateAction<boolean>>;
   userId: string;
   userName: string;
 }
@@ -40,7 +42,7 @@ type InputToken =
 const useSessionId = () => useMemo(() => crypto.randomUUID(), []);
 const AI_COMMAND_REGEX = /^@ai\b/i;
 
-const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) => {
+const Chat = ({ selectedRoom, setSelectedRoom, userId, userName, externalLoading, setExternalLoading } : ChatProps) => {
   const PAGE_SIZE = 20;
   const TYPING_IDLE_MS = 3000;
   const TYPING_STALE_MS = 5000;
@@ -50,16 +52,11 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   const presenceKey = `${userId}:${sessionId}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState<number>(0);
   const [input, setInput] = useState<string>("");
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
-
-  const [tokens, setTokens] = useState<InputToken[]>([
-    { type: "text", value: "" }
-  ]);
 
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
@@ -485,7 +482,7 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
   const fetchMessages = useCallback(async (pageNumber: number) => {
     if (!selectedRoom) return;
-    setLoading(true);
+    setExternalLoading(true);
 
     try {
       const from = pageNumber * PAGE_SIZE;
@@ -522,13 +519,13 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
     } catch (e) {
       setPageError("Failed to load messages. Please try again later.");
     } finally {
-      setLoading(false);
+      setExternalLoading(false);
     }
   }, [selectedRoom, scrollToBottom]);
 
   const handleScroll = () => {
     const el = containerRef.current;
-    if (!el || loading || !hasMore) return;
+    if (!el || externalLoading || !hasMore) return;
     if (el.scrollTop === 0) {
       prevHeightRef.current = el.scrollHeight;
       const nextPage = page + 1;
@@ -731,7 +728,8 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
       setIsOtherTyping(false);
       return;
     }
-
+    
+    setExternalLoading(true);
     setMessages([]);
     setPage(0);
     setHasMore(true);
@@ -803,10 +801,10 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
 
   // Sticky Scroll
   useEffect(() => {
-    if (!loading && page === 0) {
+    if (!externalLoading && page === 0) {
       scrollToBottom("smooth");
     }
-  }, [messages, isOtherTyping, loading, page, scrollToBottom]);
+  }, [messages, isOtherTyping, externalLoading, page, scrollToBottom]);
 
   useEffect(() => {
     const nonAiSenderIds = Array.from(
@@ -859,9 +857,9 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName } : ChatProps) =
   
   return (
     <div className="flex-2 min-h-0 p-2 flex flex-col gap-4">
-      {loading && page === 0 ? (
+      {externalLoading && page === 0 ? (
         <div className="h-full flex-center">
-          <PuffLoader color="#CFCFCF" loading={loading}/>
+          <PuffLoader color="#CFCFCF" loading={externalLoading}/>
         </div>
       ) : !selectedRoom ? (
         <div className="h-full flex-center">

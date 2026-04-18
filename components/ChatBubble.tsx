@@ -5,7 +5,7 @@ import { BeatLoader } from "react-spinners";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Info, Play, Square, Trash2 } from "lucide-react";
-import { ComponentPropsWithoutRef, useCallback, useEffect, useMemo, useState } from "react";
+import { ComponentPropsWithoutRef, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import AudioPreview from "./AudioPreview";
 
 type ChatBubbleProps = {
@@ -29,6 +29,28 @@ const ChatBubble = ({ message, isSent, senderName, failed, sendMessage } : ChatB
 
   const { created_at, content, sending } = message; 
   const isVoiceMessage = message.message_type === 2;
+
+  const AI_TAG_RE = /@ai\b/gi;
+
+  const  renderContentWithAiTags = (text: string): ReactNode[] => {
+    const parts = text.split(AI_TAG_RE);
+    const matches = text.match(AI_TAG_RE) ?? [];
+    const out: ReactNode[] = [];
+    parts.forEach((part, i) => {
+      if (part) out.push(part);
+      if (i < matches.length) {
+        out.push(
+          <span
+            key={`ai-${i}`}
+            className="mx-0.5 inline-flex items-center rounded-full bg-blue-500/20 px-2 py-1 text-xs font-bold text-blue-700 align-middle"
+          >
+            @ai
+          </span>
+        );
+      }
+    });
+    return out;
+  }
 
   const speechText = useMemo(
     () =>
@@ -181,7 +203,7 @@ const ChatBubble = ({ message, isSent, senderName, failed, sendMessage } : ChatB
           </div>
         ) : (
           <p className="text-sm font-medium w-full whitespace-pre-wrap">
-            {content}
+            {renderContentWithAiTags(content)}
           </p>
         )}
 

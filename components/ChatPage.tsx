@@ -9,11 +9,17 @@ import SignOutSubmitButton from "@/components/SignOutSubmitButton";
 const ChatPage = () => {
   const { name: userName, id: userId } = useUserStore();
   const [selectedRoom, setSelectedRoom] = useState<string | undefined>();
+  const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [authError] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const params = new URLSearchParams(window.location.search);
     return params.get("error");
   });
+
+  const handleSelectRoom = (roomId: string | undefined) => {
+    setChatLoading(roomId !== undefined);
+    setSelectedRoom(roomId);
+  }
 
   return (
     <main className="h-dvh w-screen flex-center bg-zinc-50 font-sans dark:bg-black overflow-hidden">
@@ -31,16 +37,16 @@ const ChatPage = () => {
             <SignOutSubmitButton />
           </form>
         </div>
-        {authError ? (
+        {authError && (
           <p className="text-red-400 text-sm text-center bg-red-950/40 border border-red-900 rounded-lg p-2 mb-2">
             {authError}
           </p>
-        ) : null}
+        )}
 
         <div className="w-full h-full min-h-0 flex ring-white/20 ring-2 rounded-3xl p-2 overflow-hidden">
           <Sidebar
             userId={userId}
-            onSelectRoom={setSelectedRoom}
+            handleSelectRoom={handleSelectRoom}
             currentRoomId={selectedRoom}
           />
           <Chat
@@ -48,6 +54,8 @@ const ChatPage = () => {
             setSelectedRoom={setSelectedRoom}
             userId={userId}
             userName={userName}
+            externalLoading={chatLoading}
+            setExternalLoading={setChatLoading}
           />
         </div>
       </div>

@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, Dispatch, SetStateAction } from "react";
-import { supabase } from "@/lib/supabase";
 import { createRoom } from "@/app/actions/rooms";
 import { Room } from "@/types/types";
 import { RefreshCw, X } from "lucide-react";
@@ -8,11 +7,11 @@ import { PuffLoader } from "react-spinners";
 
 type SidebarProps = {
   currentRoomId: string | undefined;
-  onSelectRoom: Dispatch<SetStateAction<string | undefined>>;
+  handleSelectRoom: (roomId: string | undefined) => void;
   userId: string;
 }
 
-const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
+const Sidebar = ({ currentRoomId, handleSelectRoom, userId }: SidebarProps) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -90,7 +89,7 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
                   return (
                     <div
                       key={room.id}
-                      onClick={() => onSelectRoom(room.id)}
+                      onClick={() => handleSelectRoom(room.id)}
                       className={`bg-black px-8 py-6 rounded-2xl transition-all 
                         duration-200 flex items-center gap-4 hover:bg-white/5 text-white/60
                         ${isRoomSelected ? "border-2 border-zinc-400 m-1 p-1 cursor-auto" : "cursor-pointer"}`}
@@ -103,7 +102,7 @@ const Sidebar = ({ currentRoomId, onSelectRoom, userId }: SidebarProps) => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation(); // prevents parent click
-                            onSelectRoom(undefined);
+                            handleSelectRoom(undefined);
                           }}
                           className="bg-white text-black p-1.5 rounded-full cursor-pointer"
                         >
