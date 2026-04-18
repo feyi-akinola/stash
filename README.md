@@ -6,6 +6,17 @@ Stash is a high-performance, real-time collaboration platform designed for moder
 [🚀 Live Preview](https://stash-psi-three.vercel.app/)
 
 ## Tech Stack
+<div align="center">
+  <img src="public/images/stash-banner.png" alt="Stash Banner" />
+  
+  <p>
+    <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=fff" />
+    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" />
+    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
+    <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind%20CSS-4-38B2AC?logo=tailwindcss&logoColor=white" />
+    <img alt="Supabase" src="https://img.shields.io/badge/Supabase-%2320232a.svg?logo=supabase&logoColor=white" />
+  </p>
+</div>
 
 - **Next.js (App Router, TypeScript, React 19)**
 - **Supabase** (`@supabase/supabase-js`) for realtime + database

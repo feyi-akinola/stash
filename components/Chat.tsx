@@ -414,6 +414,54 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName, externalLoading
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+
+    const text = e.clipboardData.getData("text/plain");
+
+    // insert plain text at cursor
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+
+    selection.deleteFromDocument();
+    selection.getRangeAt(0).insertNode(document.createTextNode(text));
+
+    // move cursor to end of inserted text
+    selection.collapseToEnd();
+  }
+
+  const handleCopy = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  
+    if (!editorRef.current) return;
+  
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+  
+    const range = selection.getRangeAt(0);
+  
+    // clone selected content
+    const fragment = range.cloneContents();
+  
+    let text = "";
+  
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent;
+      } else if (node instanceof HTMLElement) {
+        if (node.textContent === "@ai") {
+          text += "@ai ";
+        } else {
+          node.childNodes.forEach(walk);
+        }
+      }
+    };
+  
+    fragment.childNodes.forEach(walk);
+  
+    e.clipboardData.setData("text/plain", text.trim());
+  };
+
   const insertAICommandFromMenu = () => {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
@@ -919,6 +967,8 @@ const Chat = ({ selectedRoom, setSelectedRoom, userId, userName, externalLoading
                           contentEditable
                           onInput={handleInput}
                           onKeyDown={handleKeyDown}
+                          onPaste={handlePaste}
+                          onCopy={handleCopy}
                           className="w-full outline-0 text-white/90 bg-transparent"
                           data-placeholder="Write a message..."
                         />
